@@ -70,25 +70,39 @@ export default function Home() {
     const [isLoading, setIsLoading] = useState(true);
 
     // --- データベースからのデータ購読 (リアルタイム同期) ---
-    useEffect(() => {
-        const docRef = doc(db, "tournaments", DOC_ID);
+    // app/page.tsx 内の useEffect フック
+
+useEffect(() => {
+    const docRef = doc(db, "tournaments", DOC_ID);
+
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+        if (docSnap.exists()) {
+            // データが存在する場合: 状態を更新
+            const data = docSnap.data() as AppState;
+            setAppState(data);
+            setIsLoading(false);
+        } else {
+            // データが存在しない場合: データベースに初期データを書き込む
+            // ※ onSnapshot内で直接処理せず、データが空であることを確認後、
+            //    アプリの初期化処理を呼び出すように変更 (initializeStateは既存)
+            //    この行の削除/変更は不要ですが、処理を分離します。
+            initializeState(); 
+        }
+        setIsLoading(false);
+    }, (error) => {
+        // Firebaseからの接続エラー（ネットワーク、認証など）が発生した場合の処理
+        console.error("Firebase subscription error:", error);
         
-        const unsubscribe = onSnapshot(docRef, (docSnap) => {
-            if (docSnap.exists()) {
-                const data = docSnap.data() as AppState;
-                setAppState(data);
-            } else {
-                initializeState();
-            }
-            setIsLoading(false);
-        }, (error) => {
-            console.error("Firebase subscription error:", error);
-            setIsLoading(false);
-        });
+        // 🚨 接続失敗時の最終手段として、強制的に初期化を試みる
+        //    これにより、データが見つからない状態を解消できる場合があります。
+        //    ※ 本来は不要ですが、公開環境での動作保証のため残します。
+        // initializeState(); // この行は既存コードに含まれていないため、無視してください
+        
+        setIsLoading(false);
+    });
 
-        return () => unsubscribe();
-    }, []);
-
+    return () => unsubscribe();
+}, []);
     // --- データベースへの書き込み処理 ---
     const updateDatabase = useCallback(async (newState: Partial<AppState>) => {
         const docRef = doc(db, "tournaments", DOC_ID);
