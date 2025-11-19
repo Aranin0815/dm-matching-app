@@ -121,7 +121,7 @@ export default function Home() {
         try {
             // 既存のドキュメントを初期状態で上書き
             await setDoc(docRef, initialState);
-            alert("大会状態がリセットされました！新しい大会を開始できます。");
+            alert("リセット完了");
         } catch (error) {
             console.error("Error resetting database:", error);
             alert("リセット中にエラーが発生しました。");
