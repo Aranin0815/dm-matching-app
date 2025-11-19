@@ -1,21 +1,21 @@
 // firebase/config.ts
 
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore"; // Firestore（データベース）をインポート
+import { getFirestore } from "firebase/firestore";
 
-// ↓↓↓ あなたがコピーした firebaseConfig オブジェクトを使用します ↓↓↓
+// Vercelに登録した環境変数から設定を取得
 const firebaseConfig = {
-  apiKey: "AIzaSyCADekFY9TMrU9ewG_eoaQtnzhJCJv43Uw",
-  authDomain: "dm-match-sharing.firebaseapp.com",
-  projectId: "dm-match-sharing",
-  storageBucket: "dm-match-sharing.firebasestorage.app",
-  messagingSenderId: "680988108788",
-  appId: "1:680988108788:web:35c68ceb26e43ff61afba1",
-  measurementId: "G-Y0N28Y3KVG" // これは不要ですが、残しておいても問題ありません
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+  // measurementId は省略します
 };
 
-// 1. Firebase を初期化
+// アプリを初期化
 const app = initializeApp(firebaseConfig);
 
-// 2. Firestoreのインスタンスを取得し、エクスポート
+// Firestoreのインスタンスを取得し、エクスポート
 export const db = getFirestore(app);
