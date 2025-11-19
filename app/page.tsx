@@ -220,7 +220,29 @@ export default function Home() {
         }
     };
     // ----------------------------------------------------
+      // app/page.tsx のどこか (例: startNextRound の上あたり)
 
+    // プレイヤーのドロップ/復帰を切り替える (データベース更新)
+    const togglePlayerDrop = async (playerId: string) => {
+      if (!appState) return;
+
+      const updatedPlayers = appState.players.map((p) => {
+          if (p.id === playerId) {
+              // isDropped の状態をトグルする
+              const newState = !p.isDropped;
+              if (newState) {
+                  alert(`${p.name} をドロップしました。`);
+              } else {
+                  alert(`${p.name} を大会に復帰させました。`);
+              }
+              return { ...p, isDropped: newState };
+          }
+          return p;
+      });
+
+      // データベースを更新
+  await updateDatabase({ players: updatedPlayers });
+};
     // トーナメント開始・次ラウンドへ (データベース更新)
     const startNextRound = async () => {
         if (!appState) return;
@@ -261,7 +283,8 @@ export default function Home() {
             }
         }
         // ... (終了判定ロジックここまで) ...
-
+        // 【ここを修正】: ドロップしていないプレイヤーのみを抽出
+        const activePlayers = appState.players.filter(p => !p.isDropped);
         // マッチング生成
         const newMatches = generatePairings(appState.players);
 
@@ -383,8 +406,18 @@ export default function Home() {
                         </div>
                         <ul className="grid grid-cols-2 gap-2 text-sm">
                             {players.map((p) => (
-                                <li key={p.id} className="bg-gray-50 px-3 py-1 rounded border">
-                                    {p.name}
+                                <li key={p.id} className={`flex justify-between items-center px-3 py-1 rounded border ${p.isDropped ? 'bg-red-100 text-gray-500 line-through' : 'bg-gray-50'}`}>
+                                    <span className="truncate">{p.name}</span>
+                                    <button
+                                        onClick={() => togglePlayerDrop(p.id)}
+                                        className={`ml-2 px-2 py-0.5 text-xs rounded transition-colors font-semibold ${
+                                            p.isDropped
+                                                ? 'bg-blue-500 text-white hover:bg-blue-600'
+                                                : 'bg-red-500 text-white hover:bg-red-600'
+                                        }`}
+                                    >
+                                        {p.isDropped ? '復帰' : 'ドロップ'}
+                                    </button>
                                 </li>
                             ))}
                         </ul>
