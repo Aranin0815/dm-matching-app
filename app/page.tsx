@@ -2,21 +2,22 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Player, Match } from "@/type";
-import { generatePairings } from "@/utils/swiss"; // 既存のユーティリティを使用
+// 必要に応じて、Player, Matchの型定義をここからインポートするか、ファイル内に定義があるか確認してください
+import { Player, Match } from "@/type"; 
+import { generatePairings } from "@/utils/swiss";
 
 // Firebase Firestore 関連のインポート
-import { db } from "@/firebase/config"; // 作成した設定ファイルをインポート
+import { db } from "@/firebase/config";
 import { 
     collection, 
     doc, 
     onSnapshot, 
-    setDoc, 
+    setDoc, // リセットに必要
     updateDoc, 
     serverTimestamp 
 } from "firebase/firestore";
 
-// --- 型定義 (簡略化のためにここに再定義) ---
+// --- 型定義 (ファイル内に存在しない場合はここに置く) ---
 type Top8Player = Pick<Player, 'id' | 'name'>;
 type TournamentMatch = {
   id: string;
@@ -47,6 +48,21 @@ interface AppState {
 // データベース内のドキュメントID
 const DOC_ID = "current_tournament"; 
 
+// --- 初期状態定義 ---
+const getInitialState = (): AppState => ({
+    players: [],
+    matches: [],
+    round: 0,
+    isTournamentStarted: false,
+    isTournamentFinished: false,
+    top8Players: [],
+    qfMatches: [],
+    sfMatches: [],
+    finalMatch: null,
+    champion: null,
+    tournamentStage: null,
+});
+
 export default function Home() {
     // データベースから取得したデータを保持する state
     const [appState, setAppState] = useState<AppState | null>(null);
@@ -57,14 +73,11 @@ export default function Home() {
     useEffect(() => {
         const docRef = doc(db, "tournaments", DOC_ID);
         
-        // リアルタイムリスナーを設定
         const unsubscribe = onSnapshot(docRef, (docSnap) => {
             if (docSnap.exists()) {
-                // データが存在する場合、stateを更新
                 const data = docSnap.data() as AppState;
                 setAppState(data);
             } else {
-                // データが存在しない場合、初期状態をデータベースに設定
                 initializeState();
             }
             setIsLoading(false);
@@ -73,7 +86,6 @@ export default function Home() {
             setIsLoading(false);
         });
 
-        // クリーンアップ関数
         return () => unsubscribe();
     }, []);
 
@@ -90,24 +102,32 @@ export default function Home() {
 
     // 初期状態の設定 (データベースが存在しない場合)
     const initializeState = useCallback(async () => {
-        const initialState: AppState = {
-            players: [],
-            matches: [],
-            round: 0,
-            isTournamentStarted: false,
-            isTournamentFinished: false,
-            top8Players: [],
-            qfMatches: [],
-            sfMatches: [],
-            finalMatch: null,
-            champion: null,
-            tournamentStage: null,
-        };
+        const initialState = getInitialState();
         const docRef = doc(db, "tournaments", DOC_ID);
         await setDoc(docRef, initialState);
         setAppState(initialState);
     }, []);
-
+    
+    // 大会状態を初期化（リセット）
+    const resetTournament = async () => {
+        // 最終確認
+        if (!confirm("⚠️ 警告: 本当に大会をリセットしますか？この操作は元に戻せません。全ての試合結果、参加者情報が削除されます。")) {
+            return;
+        }
+        
+        const initialState = getInitialState();
+        const docRef = doc(db, "tournaments", DOC_ID);
+        
+        try {
+            // 既存のドキュメントを初期状態で上書き
+            await setDoc(docRef, initialState);
+            alert("大会状態がリセットされました！新しい大会を開始できます。");
+        } catch (error) {
+            console.error("Error resetting database:", error);
+            alert("リセット中にエラーが発生しました。");
+        }
+    };
+    
     // プレイヤー追加 (データベース更新)
     const addPlayer = async () => {
         if (!inputValue.trim() || !appState) return;
@@ -125,6 +145,26 @@ export default function Home() {
         setInputValue("");
     };
 
+    // プレイヤーのドロップ/復帰を切り替える (データベース更新)
+    const togglePlayerDrop = async (playerId: string) => {
+        if (!appState) return;
+
+        const updatedPlayers = appState.players.map((p) => {
+            if (p.id === playerId) {
+                const newState = !p.isDropped;
+                if (newState) {
+                    alert(`${p.name} をドロップしました。`);
+                } else {
+                    alert(`${p.name} を大会に復帰させました。`);
+                }
+                return { ...p, isDropped: newState };
+            }
+            return p;
+        });
+
+        await updateDatabase({ players: updatedPlayers });
+    };
+
     // --- スイスドローの勝敗登録・修正関数 (データベース更新) ---
     const handleSwissResult = async (matchIndex: number, newWinnerId: string) => {
         if (!appState) return;
@@ -137,16 +177,13 @@ export default function Home() {
 
         match.winnerId = newWinnerId;
 
-        // プレイヤーデータの更新 (ポイントの修正を含む)
         const updatedPlayers = appState.players.map((p) => {
             let newPoints = p.points;
 
-            // 1. 古い勝者のポイントを戻す
             if (p.id === oldWinnerId) {
                 newPoints -= 3;
             }
 
-            // 2. 新しい勝者のポイントを加算
             if (p.id === newWinnerId) {
                 newPoints += 3;
             }
@@ -171,7 +208,6 @@ export default function Home() {
         let finalMatchUpdate: TournamentMatch | null = appState.finalMatch;
         let championUpdate: Top8Player | null = appState.champion;
 
-        // 該当ステージの配列と対象の試合を設定
         if (stage === 'QF') {
             newMatches = [...appState.qfMatches];
             targetMatch = newMatches[matchIndex];
@@ -180,19 +216,16 @@ export default function Home() {
             targetMatch = newMatches[matchIndex];
         } else { // Finals
             if (!appState.finalMatch) return;
-            targetMatch = {...appState.finalMatch}; // finalMatchは単独オブジェクトなのでコピー
-            newMatches = [targetMatch]; // 配列として扱う
+            targetMatch = {...appState.finalMatch}; 
+            newMatches = [targetMatch]; 
         }
 
-        // 勝利者の設定 (トグル操作: 同じプレイヤーを再度押したら null に戻す)
         targetMatch.winner = targetMatch.winner?.id === winner.id ? null : winner;
 
-        // ステージごとの状態更新と次の組み合わせ生成
         if (stage === 'QF') {
             const allQfWinners = newMatches.map(m => m.winner).filter(w => w !== null);
             if (allQfWinners.length === 4) {
                 newStage = 'SF';
-                // SFの組み合わせを生成
                 const sfPairings: TournamentMatch[] = [
                     { id: 'sf1', player1: allQfWinners[0]!, player2: allQfWinners[1]!, winner: null }, 
                     { id: 'sf2', player1: allQfWinners[2]!, player2: allQfWinners[3]!, winner: null } 
@@ -205,7 +238,6 @@ export default function Home() {
             const allSfWinners = newMatches.map(m => m.winner).filter(w => w !== null);
             if (allSfWinners.length === 2) {
                 newStage = 'Finals';
-                // Finalsの組み合わせを生成
                 finalMatchUpdate = { id: 'final', player1: allSfWinners[0]!, player2: allSfWinners[1]!, winner: null };
             } else {
                 finalMatchUpdate = null;
@@ -220,42 +252,19 @@ export default function Home() {
         }
     };
     // ----------------------------------------------------
-      // app/page.tsx のどこか (例: startNextRound の上あたり)
 
-    // プレイヤーのドロップ/復帰を切り替える (データベース更新)
-    const togglePlayerDrop = async (playerId: string) => {
-      if (!appState) return;
-
-      const updatedPlayers = appState.players.map((p) => {
-          if (p.id === playerId) {
-              // isDropped の状態をトグルする
-              const newState = !p.isDropped;
-              if (newState) {
-                  alert(`${p.name} をドロップしました。`);
-              } else {
-                  alert(`${p.name} を大会に復帰させました。`);
-              }
-              return { ...p, isDropped: newState };
-          }
-          return p;
-      });
-
-      // データベースを更新
-  await updateDatabase({ players: updatedPlayers });
-};
     // トーナメント開始・次ラウンドへ (データベース更新)
     const startNextRound = async () => {
         if (!appState) return;
 
-        // ... (省略: 終了判定ロジック。前回実装済み) ...
         const currentRoundNumber = appState.round;
 
         if (currentRoundNumber > 0) {
             const maxPossiblePoints = currentRoundNumber * 3;
-            const undefeatedPlayers = appState.players.filter(p => !p.isDropped && p.points === maxPossiblePoints);
+            const activePlayers = appState.players.filter(p => !p.isDropped);
+            const undefeatedPlayers = activePlayers.filter(p => p.points === maxPossiblePoints);
 
-            if (undefeatedPlayers.length === 1) {
-                // 大会終了とTop 8選出
+            if (undefeatedPlayers.length === 1 || activePlayers.length <= 8) { // 予選終了判定を修正 (参加者が8人以下になった場合も終了)
                 const sortedPlayers = [...appState.players]
                     .sort((a, b) => b.points - a.points)
                     .filter(p => !p.isDropped);
@@ -282,11 +291,10 @@ export default function Home() {
                 return; 
             }
         }
-        // ... (終了判定ロジックここまで) ...
-        // 【ここを修正】: ドロップしていないプレイヤーのみを抽出
+
+        // ドロップしていないプレイヤーのみでマッチング生成
         const activePlayers = appState.players.filter(p => !p.isDropped);
-        // マッチング生成
-        const newMatches = generatePairings(appState.players);
+        const newMatches = generatePairings(activePlayers);
 
         // Byeプレイヤーのポイントをここで即座に更新する
         let updatedPlayers = [...appState.players];
@@ -295,7 +303,8 @@ export default function Home() {
         if (byeMatch) {
             const byePlayerId = byeMatch.player1.id;
             updatedPlayers = updatedPlayers.map((p) => {
-                if (p.id === byePlayerId && !p.hasBye) {
+                // ドロップしていないプレイヤーのみがByeの対象
+                if (p.id === byePlayerId && !p.hasBye && !p.isDropped) {
                     return { ...p, points: p.points + 3, hasBye: true };
                 }
                 return p;
@@ -320,12 +329,12 @@ export default function Home() {
         );
     }
     
-    // appState をローカル変数に展開し、コードをシンプルにする
+    // appState をローカル変数に展開
     const { players, matches, round, isTournamentStarted, isTournamentFinished, qfMatches, sfMatches, finalMatch, tournamentStage, champion } = appState;
     
     // --- UIのレンダリング (前回実装したロジックをベースに) ---
     const TournamentMatchDisplay = ({ match, index, stage, handler }: { match: TournamentMatch, index: number, stage: 'QF' | 'SF' | 'Finals', handler: (index: number, winner: Top8Player) => Promise<void> }) => {
-        // ... (UIコンポーネントの定義は長いため省略します。前回実装したものをそのまま利用できます) ...
+        // ... (UIコンポーネントの定義。コードは長いため省略しますが、これは前回のものと同じです) ...
         const isFinal = stage === 'Finals';
         const isChampionDeclared = stage === 'Finals' && match.winner;
         const stageName = isFinal ? 'FINAL' : (stage === 'SF' ? `SF ${index + 1}` : `QF ${index + 1}`);
@@ -377,12 +386,27 @@ export default function Home() {
         );
     };
 
+
     return (
         <div className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
             <div className="max-w-2xl mx-auto bg-white shadow-lg rounded-lg p-6">
                 <h1 className="text-2xl font-bold mb-6 text-center border-b pb-4">
                     デュエマ 対戦マッチング (DB共有版)
                 </h1>
+
+                {/* ===== リセットボタンの場所 ===== */}
+                {(isTournamentStarted || players.length > 0) && (
+                    <div className="mb-6 flex justify-end">
+                        <button
+                            onClick={resetTournament}
+                            className="bg-red-500 text-white px-4 py-2 rounded font-bold hover:bg-red-600 shadow text-sm"
+                        >
+                            ⚠️ 大会全体をリセット
+                        </button>
+                    </div>
+                )}
+                {/* ============================= */}
+
 
                 {/* 参加登録フェーズ */}
                 {!isTournamentStarted && (
@@ -404,6 +428,7 @@ export default function Home() {
                                 追加
                             </button>
                         </div>
+                        {/* ドロップ機能付きリスト */}
                         <ul className="grid grid-cols-2 gap-2 text-sm">
                             {players.map((p) => (
                                 <li key={p.id} className={`flex justify-between items-center px-3 py-1 rounded border ${p.isDropped ? 'bg-red-100 text-gray-500 line-through' : 'bg-gray-50'}`}>
@@ -435,6 +460,7 @@ export default function Home() {
                 {/* スイスドロー / トーナメント フェーズ */}
                 {isTournamentStarted && (
                     <div>
+                        {/* ... (既存のトーナメント表示ロジックは省略) ... */}
                         {isTournamentFinished ? (
                             // --- トーナメント画面 ---
                             <div className="text-center p-8 border-4 border-yellow-500 bg-yellow-50 rounded-lg mb-8">
@@ -582,7 +608,7 @@ export default function Home() {
                                 {[...players].sort((a, b) => b.points - a.points).map((p, i) => (
                                     <tr key={p.id} className="border-b last:border-0">
                                         <td className="py-2">{i + 1}</td>
-                                        <td>{p.name}</td>
+                                        <td>{p.name} {p.isDropped && <span className="text-red-500">(ドロップ)</span>}</td>
                                         <td>{p.points}</td>
                                     </tr>
                                 ))}
